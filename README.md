@@ -1,8 +1,7 @@
 # hydro2dRP
 *ChatGPT was used to organize this Readme file.*
 
-![Example of drought duration-severity return periods](image.png)
-
+![Ryan-vanderHeijden/hydro2dRP](hydro2dRP_logo.png)
 
 ---
 
@@ -38,13 +37,13 @@ Let $$( U, V \in (0,1) )$$ be marginal probability integral transforms.
 
 The **Gumbel copula** is
 $$
-
 C(u, v) = \exp\left(
 
 * \left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}
   \right), \quad \theta \ge 1
-
 $$
+
+
 Common return period definitions used here:
 
 * **AND case**:
