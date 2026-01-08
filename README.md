@@ -34,30 +34,40 @@ This code is intended for **internal use** in exploratory analysis, model develo
 
 ## Mathematical background (brief)
 
-Let ( U, V \in (0,1) ) be marginal probability integral transforms.
+Let $$( U, V \in (0,1) )$$ be marginal probability integral transforms.
 
 The **Gumbel copula** is
+$$
 
-[
 C(u, v) = \exp\left(
 
 * \left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}
   \right), \quad \theta \ge 1
-  ]
 
+$$
 Common return period definitions used here:
 
 * **AND case**:
-  ( T_{AND} = \frac{1}{P(U > u, V > v)} = \frac{1}{1 - u - v + C(u,v)} )
+  $$ T_{AND} = \frac{1}{P(U > u, V > v)} = \frac{1}{1 - u - v + C(u,v)} $$
 
 * **OR case**:
-  ( T_{OR} = \frac{1}{P(U > u \cup V > v)} = \frac{1}{1 - C(u,v)} )
+  $$ T_{OR} = \frac{1}{P(U > u \cup V > v)} = \frac{1}{1 - C(u,v)} $$
 
-* **Kendall return period**:
-  Based on quantiles of the copula distribution ( C(U,V) )
+* **Kendall return period**:xwx`
+  $$ T_{K}(u,v) = \frac{1}{1−K(C(u,v))} $$
 
 ---
 
+## Overview of return period types
+
+| Contour type | What is fixed              | Interpretation          |
+| ------------ | -------------------------- | ----------------------- |
+| AND          | $$P(X>x,Y>y)$$             | simultaneous exceedance |
+| OR           | $$P(X>x \text{ or } Y>y)$$ | system failure          |
+| Kendall      | rank of $$C(u,v)$$         | joint extremeness       |
+
+
+---
 ## Installation / Requirements
 
 This is **not a packaged library**. Clone the repo and import directly.
@@ -193,6 +203,6 @@ plt.show()
 
 ## Contact / ownership
 
-Internal code — contact the repo owner for questions or modifications.
+Internal code — contact Ryan van der Heijden for questions or modifications.
 
 ---
