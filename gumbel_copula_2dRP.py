@@ -329,6 +329,19 @@ def kendall_level(C_sorted, T):
 
 
 
+def gumbel_kendall_isoline(u, c_T, theta):
+    A0 = (-np.log(c_T))**theta
+    B = (-np.log(u))**theta
+
+    v = np.full_like(u, np.nan)
+    valid = B < A0
+    v[valid] = np.exp(-(A0 - B[valid])**(1/theta))
+
+    return v
+
+
+
+
 # Gumbel Contours and Likelihood
 def gumbel_contour(u, c0, theta):
     '''
