@@ -1,7 +1,7 @@
 # hydro2dRP
 *ChatGPT was used to organize this Readme file.*
 
-![Ryan-vanderHeijden/hydro2dRP](hydro2dRP_logo.png)
+![Ryan-vanderHeijden/hydro2dRP](hydro2dRP_square_logo_dark.png)
 
 ---
 
@@ -36,24 +36,19 @@ This code is intended for **internal use** in exploratory analysis, model develo
 Let $$( U, V \in (0,1) )$$ be marginal probability integral transforms.
 
 The **Gumbel copula** is
-$$
-C(u, v) = \exp\left(
-
-* \left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}
-  \right), \quad \theta \ge 1
-$$
+$$ C(u, v) = \exp\left(\left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}\right), \quad \theta \ge 1$$
 
 
 Common return period definitions used here:
 
 * **AND case**:
-  $$ T_{AND} = \frac{1}{P(U > u, V > v)} = \frac{1}{1 - u - v + C(u,v)} $$
+$$T_{AND} = \frac{1}{P(U > u, V > v)} = \frac{1}{1 - u - v + C(u,v)}$$
 
 * **OR case**:
-  $$ T_{OR} = \frac{1}{P(U > u \cup V > v)} = \frac{1}{1 - C(u,v)} $$
+$$T_{OR} = \frac{1}{P(U > u \cup V > v)} = \frac{1}{1 - C(u,v)}$$
 
-* **Kendall return period**:xwx`
-  $$ T_{K}(u,v) = \frac{1}{1−K(C(u,v))} $$
+* **Kendall return period**:
+$$T_{K}(u,v) = \frac{1}{1−K(C(u,v))}$$
 
 ---
 
@@ -202,6 +197,6 @@ plt.show()
 
 ## Contact / ownership
 
-Internal code — contact Ryan van der Heijden for questions or modifications.
+Internal code — contact me for questions or modifications.
 
 ---
