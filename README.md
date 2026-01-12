@@ -1,7 +1,9 @@
 # hydro2dRP
 *ChatGPT was used to organize this Readme file.*
 
-![Ryan-vanderHeijden/hydro2dRP](hydro2dRP_square_logo_dark.png)
+<!-- ![Ryan-vanderHeijden/hydro2dRP](hydro2dRP_square_logo_dark.png) -->
+<img src='hydro2dRP_square_logo_dark.png' width='400' height='400'>
+
 
 ---
 
@@ -36,7 +38,7 @@ This code is intended for **internal use** in exploratory analysis, model develo
 Let $$( U, V \in (0,1) )$$ be marginal probability integral transforms.
 
 The **Gumbel copula** is
-$$ C(u, v) = \exp\left(\left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}\right), \quad \theta \ge 1$$
+$$C(u, v) = \exp\left(\left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}\right), \quad \theta \ge 1$$
 
 
 Common return period definitions used here:
