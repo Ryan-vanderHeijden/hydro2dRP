@@ -66,7 +66,7 @@ $$T_{K}(u,v) = \frac{1}{1−K(C(u,v))}$$
 ---
 ## Installation / Requirements
 
-This is **not a packaged library**. Clone the repo and import directly.
+Clone the repo and import directly.
 
 ### Dependencies
 
