@@ -1,12 +1,94 @@
 import numpy as np
 import scipy as sp
-from scipy.stats import levy_stable, uniform, norm
+import pandas as pd
+from scipy.stats import levy_stable, uniform, norm, rankdata
 from scipy.optimize import minimize
 from scipy.stats import kendalltau
 
 
 
 
+# Temporal Clustering
+'''
+site_id | start_time | end_time | severity | duration
+'''
+
+def event_midpoint(start, end):
+    return start + (end - start) / 2
+
+
+
+
+def temporal_clustering(events, delta_t):
+    '''
+    Cluster site-level drought events into independent regional events.
+
+    Parameters
+    ----------
+    events : DataFrame (sorted by event_time)
+    delta_t : pandas.Timedelta
+
+    Returns
+    -------
+    clusters : list of DataFrames
+    '''
+    clusters = []
+    current = [events.iloc[0]]
+
+    for i in range(1, len(events)):
+        t_prev = current[-1]['event_time']
+        t_curr = events.iloc[i]['event_time']
+
+        if (t_curr - t_prev) <= delta_t:
+            current.append(events.iloc[i])
+        else:
+            clusters.append(pd.DataFrame(current))
+            current = [events.iloc[i]]
+
+    clusters.append(pd.DataFrame(current))
+    return clusters
+
+
+
+
+def aggregate_cluster(cluster,
+                      duration_rule='max',
+                      severity_rule='max'):
+    '''
+    Aggregate a regional drought cluster into one multivariate event.
+    '''
+    if severity_rule == 'max':
+        S = cluster['severity'].max()
+    elif severity_rule == 'sum':
+        S = cluster['severity'].sum()
+    elif severity_rule == 'mean':
+        S = cluster['severity'].mean()
+    else:
+        raise ValueError('Unknown severity rule')
+
+    if duration_rule == 'max':
+        D = cluster['duration'].max()
+    elif duration_rule == 'mean':
+        D = cluster['duration'].mean()
+    else:
+        raise ValueError('Unknown duration rule')
+
+    return D, S
+
+
+
+
+def pseudo_observations(x):
+    '''
+    Convert data to pseudo-observations in (0,1)
+    '''
+    r = rankdata(x, method='average')
+    return r / (len(x) + 1)
+
+
+
+
+# Kendall bootstrap
 def gumbel_copula(u, v, theta):
     '''
     Gumbel copula cumulative distribution function.
@@ -49,10 +131,10 @@ def invert_kendall_level(K_target, theta):
 
 
 def fit_gumbel_theta(u, v):
-    """
+    '''
     Fit Gumbel copula using Kendall's tau inversion
     (robust and fast for bootstrap)
-    """
+    '''
     tau, _ = kendalltau(u, v)
     return 1.0 / (1.0 - tau)
 
@@ -64,9 +146,9 @@ def bootstrap_kendall_contours(u_reg, v_reg, T,
                                grid_size=200,
                                alpha=0.05,
                                random_state=None):
-    """
+    '''
     Bootstrap Kendall contour confidence bands using ESS
-    """
+    '''
 
     rng = np.random.default_rng(random_state)
     n_eff = len(u_reg)
@@ -103,9 +185,9 @@ def bootstrap_kendall_contours(u_reg, v_reg, T,
     median = np.quantile(contour_stack, 0.5, axis=0)
 
     return U, V, {
-        "median": median,
-        "lower": lower,
-        "upper": upper
+        'median': median,
+        'lower': lower,
+        'upper': upper
     }
 
 
