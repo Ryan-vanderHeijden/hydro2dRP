@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 from scipy.stats import levy_stable, uniform, norm, rankdata
-from scipy.optimize import minimize
+from scipy.optimize import minimize, brentq
 from scipy.stats import kendalltau
 
 
@@ -21,32 +21,45 @@ def event_midpoint(start, end):
 
 def temporal_clustering(events, delta_t):
     '''
-    Cluster site-level drought events into independent regional events.
+    Cluster site-level drought events into independent regional events
+    using a fixed reference time for each cluster.
 
     Parameters
     ----------
-    events : DataFrame (sorted by event_time)
+    events : pandas.DataFrame
+        Must be sorted by 'event_time'
     delta_t : pandas.Timedelta
 
     Returns
     -------
-    clusters : list of DataFrames
+    clusters : list of pandas.DataFrame
     '''
+
     clusters = []
-    current = [events.iloc[0]]
+
+    # Initialize first cluster
+    current_cluster = [events.iloc[0]]
+    t_ref = events.iloc[0]['event_time']
 
     for i in range(1, len(events)):
-        t_prev = current[-1]['event_time']
-        t_curr = events.iloc[i]['event_time']
+        t_cur = events.iloc[i]['event_time']
 
-        if (t_curr - t_prev) <= delta_t:
-            current.append(events.iloc[i])
+        # Compare to fixed reference time
+        if (t_cur - t_ref) <= delta_t:
+            current_cluster.append(events.iloc[i])
         else:
-            clusters.append(pd.DataFrame(current))
-            current = [events.iloc[i]]
+            # Close current cluster
+            clusters.append(pd.DataFrame(current_cluster))
 
-    clusters.append(pd.DataFrame(current))
+            # Start new cluster
+            current_cluster = [events.iloc[i]]
+            t_ref = t_cur
+
+    # Append final cluster
+    clusters.append(pd.DataFrame(current_cluster))
+
     return clusters
+
 
 
 
@@ -63,13 +76,19 @@ def aggregate_cluster(cluster,
         S = cluster['severity'].sum()
     elif severity_rule == 'mean':
         S = cluster['severity'].mean()
+    elif severity_rule == 'median':
+        S = cluster['severity'].median()
     else:
         raise ValueError('Unknown severity rule')
 
     if duration_rule == 'max':
         D = cluster['duration'].max()
+    elif duration_rule=='sum':
+        D = cluster['duration'].sum()
     elif duration_rule == 'mean':
         D = cluster['duration'].mean()
+    elif duration_rule=='median':
+        D = cluster['duration'].median()
     else:
         raise ValueError('Unknown duration rule')
 
@@ -111,6 +130,32 @@ def gumbel_copula(u, v, theta):
 
 
 
+def invert_gumbel_v(u, t, theta):
+    """Solve C(u,v)=t for v"""
+    A = (-np.log(t))**theta - (-np.log(u))**theta
+    if A <= 0:
+        return np.nan
+    return np.exp(-(A)**(1/theta))
+
+
+
+
+def kendall_function(theta, n_mc=200_000):
+    u = np.random.rand(n_mc)
+    v = np.random.rand(n_mc)
+    C = gumbel_copula(u, v, theta)
+    return np.sort(C)
+
+
+
+
+def kendall_threshold(C_sorted, T_K):
+    p = 1 - 1 / T_K
+    return np.quantile(C_sorted, p)
+
+
+
+
 def kendall_distribution_gumbel(t, theta):
     '''
     Kendall distribution K_C(t) for the Gumbel copula
@@ -125,7 +170,7 @@ def invert_kendall_level(K_target, theta):
     Find t such that K_C(t) = K_target
     '''
     f = lambda t: kendall_distribution_gumbel(t, theta) - K_target
-    return sp.brentq(f, 1e-10, 1 - 1e-10)
+    return brentq(f, 1e-10, 1 - 1e-10)
 
 
 
@@ -204,6 +249,63 @@ def central_kendall_contour(u_reg, v_reg, T, grid_size=200):
     C = gumbel_copula(U, V, theta_hat)
     return U, V, C - t_hat
 
+
+
+
+def bootstrap_kendall_contours_lines(
+    u_reg,
+    v_reg,
+    T_K,
+    n_boot=500,
+    n_mc=200_000,
+    u_min=1e-3,
+    u_max=1-1e-3,
+    n_points=200,
+    alpha=0.05,
+):
+    """
+    Returns Kendall contour median and confidence bands as lists of (u,v)
+    """
+
+    u_grid = np.linspace(u_min, u_max, n_points)
+
+    contours = []
+
+    for b in range(n_boot):
+
+        # ── Bootstrap resample regional events ──
+        idx = np.random.randint(0, len(u_reg), len(u_reg))
+        u_b = u_reg[idx]
+        v_b = v_reg[idx]
+
+        # ── Fit copula parameter ──
+        theta_b = fit_gumbel_theta(u_b, v_b)
+
+        # ── Kendall threshold ──
+        C_sorted = kendall_function(theta_b, n_mc)
+        t_b = kendall_threshold(C_sorted, T_K)
+
+        # ── Compute contour (u,v) ──
+        v_curve = np.array([
+            invert_gumbel_v(u, t_b, theta_b) for u in u_grid
+        ])
+
+        contours.append(v_curve)
+
+    contours = np.array(contours)
+
+    # ── Confidence bands ──
+    v_med = np.nanmedian(contours, axis=0)
+    v_lo  = np.nanquantile(contours, alpha/2, axis=0)
+    v_hi  = np.nanquantile(contours, 1-alpha/2, axis=0)
+
+    return {
+        "u": u_grid,
+        "v_median": v_med,
+        "v_lower": v_lo,
+        "v_upper": v_hi,
+        "all_contours": contours  # optional, but very useful
+    }
 
 
 
