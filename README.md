@@ -1,5 +1,4 @@
 # hydro2dRP
-*ChatGPT was used to organize this Readme file.*
 
 <!-- ![Ryan-vanderHeijden/hydro2dRP](hydro2dRP_square_logo_dark.png) -->
 <img src='hydro2dRP_square_logo_dark.png' width='400' height='400'>
@@ -201,4 +200,5 @@ plt.show()
 
 Internal code — contact me for questions or modifications.
 
+*ChatGPT was used to organize this Readme file.*
 ---
