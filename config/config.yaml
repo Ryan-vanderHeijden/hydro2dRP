@@ -1,9 +1,0 @@
-# config file for the base run
-
-Name:           '2dRP_base'
-THRESH:         30
-REGIONS:        [0, 1, 2]
-MODEL:          'obs'
-EXPORTS:        False
-T:              [5, 10, 20, 50, 100]
-n:              5000
