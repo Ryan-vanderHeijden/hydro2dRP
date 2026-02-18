@@ -236,7 +236,7 @@ def joint_density_OR(u, v, theta, fx, fy):
 
 
 
-def best_fit_rv(data, dist_names, print=False):
+def best_fit_rv(data, dist_names, print_out=False):
     '''
     Fit candidate distributions and select best by AIC.
 
@@ -257,13 +257,13 @@ def best_fit_rv(data, dist_names, print=False):
         k = len(params)
         aic = 2 * k - 2 * log_likelihood
 
-        if print:
-            print(f'Distribution: {dist_name}, AIC: {aic}')
-
         if aic < best_aic:
             best_aic = aic
             best_dist = dist
             best_params = params
+            
+        if print_out:
+            print(f'Distribution: {best_dist}, AIC: {aic}')
 
     return best_dist, best_params, best_aic
 
