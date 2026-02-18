@@ -271,54 +271,6 @@ def best_fit_rv(data, dist_names, print_out=False):
 
 
 # Kendall Risk Contours and ESS functions
-def sample_gumbel(n, theta):
-    '''
-    Sample from a bivariate Gumbel copula using the
-    Marshall–Olkin algorithm.
-
-    Returns
-    -------
-    U, V : array-like
-        Copula samples.
-    '''
-    alpha = 1 / theta
-    S = levy_stable.rvs(alpha, 1, size=n)
-    E1 = -np.log(uniform.rvs(size=n))
-    E2 = -np.log(uniform.rvs(size=n))
-
-    U = np.exp(-(E1 / S)**alpha)
-    V = np.exp(-(E2 / S)**alpha)
-
-    return U, V
-
-
-
-
-def bootstrap_kendall_levels(C_sim, c_hat, return_periods, B=500, alpha=0.05):
-    '''
-    Bootstrap confidence intervals for Kendall copula levels.
-
-    Returns
-    -------
-    lower, center, upper : arrays
-        Confidence bands.
-    '''
-    n = len(C_sim)
-    q = 1 - 1 / return_periods
-    c_boot = np.empty((B, len(return_periods)))
-
-    for b in range(B):
-        C_star = np.random.choice(C_sim, size=n, replace=True)
-        c_boot[b] = np.quantile(C_star, q)
-
-    lower = np.quantile(c_boot, alpha / 2, axis=0)
-    upper = np.quantile(c_boot, 1 - alpha / 2, axis=0)
-
-    return lower, c_hat, upper
-
-
-
-
 def kendall_distribution_gumbel(t, theta):
     '''
     Kendall distribution K_C(t) for the Gumbel copula
@@ -335,64 +287,6 @@ def kendall_level(C_sorted, T):
     q = 1 - 1 / T
     return np.quantile(C_sorted, q)
 
-
-
-
-def invert_kendall_level(K_target, theta):
-    '''
-    Find t such that K_C(t) = K_target
-    '''
-    f = lambda t: kendall_distribution_gumbel(t, theta) - K_target
-    return sp.brentq(f, 1e-10, 1 - 1e-10)
-
-
-
-
-def kendall_level_confidence_bounds(T, n_eff, alpha=0.05):
-    '''
-    Confidence interval for K(t_T) using ESS
-    '''
-    K_hat = 1.0 - 1.0 / T
-    z = norm.ppf(1 - alpha / 2)
-
-    var_K = (K_hat * (1 - K_hat)) / n_eff
-    delta = z * np.sqrt(var_K)
-
-    K_L = max(1e-6, K_hat - delta)
-    K_U = min(1 - 1e-6, K_hat + delta)
-
-    return K_L, K_U
-
-
-
-
-def kendall_contour_bands(theta, T, n_eff,
-                          grid_size=200, alpha=0.05):
-    '''
-    Returns (u_grid, v_grid, contours)
-    where contours = dict with keys:
-    ['central', 'lower', 'upper']
-    '''
-    # Kendall confidence bounds
-    K_L, K_U = kendall_level_confidence_bounds(T, n_eff, alpha)
-
-    # Invert Kendall distribution
-    t_c = invert_kendall_level(1 - 1/T, theta)
-    t_L = invert_kendall_level(K_L, theta)
-    t_U = invert_kendall_level(K_U, theta)
-
-    # Grid in copula space
-    u = np.linspace(1e-4, 1 - 1e-4, grid_size)
-    v = np.linspace(1e-4, 1 - 1e-4, grid_size)
-    U, V = np.meshgrid(u, v)
-
-    C = gumbel_copula(U, V, theta)
-
-    return U, V, {
-        "central": C - t_c,
-        "lower":   C - t_L,
-        "upper":   C - t_U
-    }
 
 
 
