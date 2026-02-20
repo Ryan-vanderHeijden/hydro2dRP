@@ -69,7 +69,13 @@ I'm only including an example for the Kendall risk contours, but there are funct
 ---
 ## Installation / Requirements
 
-Clone the repo and import directly.
+Clone the repo and import the modules directly — no package installation required.
+
+```bash
+git clone https://github.com/Ryan-vanderHeijden/hydro2dRP.git
+cd hydro2dRP
+pip install -r requirements.txt
+```
 
 ### Dependencies
 
@@ -77,8 +83,9 @@ Clone the repo and import directly.
 * `numpy`
 * `scipy`
 * `matplotlib`
-
-Plus a few others...see the example file for some additional dependencies.
+* `pandas`
+* `statsmodels`
+* `colorcet` (used in the example notebook)
 
 ---
 
@@ -103,6 +110,14 @@ Plus a few others...see the example file for some additional dependencies.
 
 ---
 
-## Contact / ownership
+## License
 
-Internal code — contact me for questions or modifications.
+MIT — see [LICENSE](LICENSE).
+
+---
+
+## Contact
+
+**Ryan van der Heijden** — University of Vermont / CIROH
+
+For questions or bug reports, please [open an issue](https://github.com/Ryan-vanderHeijden/hydro2dRP/issues).

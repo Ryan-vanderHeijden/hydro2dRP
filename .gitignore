@@ -1,5 +1,8 @@
 RV_copula_plots_VT_gages.ipynb
 
+# macOS metadata
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
