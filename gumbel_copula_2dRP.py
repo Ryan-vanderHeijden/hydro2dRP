@@ -9,7 +9,7 @@ Gumbel Copula Utilities for Multivariate Extreme Value Analysis
 This module provides tools for working with the Gumbel copula, including:
 
 - Copula PDF
-- OR iso–return-period contours
+- Kendall iso–return-period contours
 - Joint density along OR contours
 - Helper utilities for distribution fitting
 
@@ -27,7 +27,7 @@ fx, fy : scipy.stats distribution objects
 References
 ----------
 - Nelsen, R. B. (2006). *An Introduction to Copulas*.
-- Salvadori et al. (2011). *Multivariate Return Periods*.
+- Salvadori et al. (2010, 2011). *Multivariate Return Periods*.
 '''
 
 import numpy as np
@@ -70,34 +70,22 @@ def gumbel_copula_pdf(u, v, theta):
 
 
 
-def iso_rp_OR(u, T, theta):
-    '''
-    OR-type iso–return-period curve v(u).
 
-    Parameters
-    ----------
-    u : array-like
-        Copula grid.
-    T : float
-        Return period.
-    theta : float
-        Copula parameter.
+def gumbel_kendall_isoline(u, c_T, theta):
+    A0 = (-np.log(c_T))**theta
+    B = (-np.log(u))**theta
 
-    Returns
-    -------
-    v : array-like
-        Corresponding v-values on OR contour.
-    '''
-    A = (-np.log(1 - 1 / T))**theta
-    term = A - (-np.log(u))**theta
-    term[term < 0] = np.nan
+    v = np.full_like(u, np.nan)
+    valid = B < A0
+    v[valid] = np.exp(-(A0 - B[valid])**(1/theta))
 
-    return np.exp(-(term)**(1 / theta))
+    return v
 
 
 
 
-def joint_density_OR(u, v, theta, fx, fy):
+
+def joint_density(u, v, theta, fx, fy):
     '''
     Joint density under OR-conditioning.
 
