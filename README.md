@@ -18,8 +18,8 @@ See the accompanying `single_gage_example.ipynb` file for example usage. There i
 ## Features
 
 * Gumbel copula **PDF**
-* **OR iso–return-period contours** in copula space
-* **Joint density along OR contours** for most-likely-event identification
+* **Kendall iso–return-period contours** in copula space
+* **Joint density along contours** for most-likely-event identification
 * **Regional pooling** for identifying independent regional events
 * Utilities for:
 
