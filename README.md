@@ -17,15 +17,9 @@ See the accompanying `single_gage_example.ipynb` file for example usage. There i
 
 ## Features
 
-* Gumbel copula **CDF and PDF**
-* **Joint return periods**
-
-  * AND case
-  * OR case
-  * Kendall risk contours
-* **Iso–return-period contours** in copula space
-* **Transforms** from copula space to real values
-* **Kendall risk contours** for different return periods
+* Gumbel copula **PDF**
+* **OR iso–return-period contours** in copula space
+* **Joint density along OR contours** for most-likely-event identification
 * **Regional pooling** for identifying independent regional events
 * Utilities for:
 
@@ -40,7 +34,7 @@ See Salvadori (2010, 2011) for more information.
 Let $$( U, V \in (0,1) )$$ be marginal probability integral transforms.
 
 The **Gumbel copula** is
-$$C(u, v) = \exp\left(\left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}\right), \quad \theta \ge 1$$
+$$C(u, v) = \exp\left(-\left[(-\log u)^\theta + (-\log v)^\theta\right]^{1/\theta}\right), \quad \theta \ge 1$$
 
 
 Common return period definitions used here:
@@ -64,7 +58,7 @@ $$T_{K}(u,v) = \frac{1}{1−K(C(u,v))}$$
 | OR           | $$P(X>x \text{ or } Y>y)$$ | system failure          |
 | Kendall      | rank of $$C(u,v)$$         | joint extremeness       |
 
-I'm only including an example for the Kendall risk contours, but there are functions for the AND and OR cases too.
+Example notebook uses Kendall return periods.
 
 ---
 ## Installation / Requirements

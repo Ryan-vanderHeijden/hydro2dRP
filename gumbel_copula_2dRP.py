@@ -8,13 +8,10 @@ Gumbel Copula Utilities for Multivariate Extreme Value Analysis
 
 This module provides tools for working with the Gumbel copula, including:
 
-- Copula CDF and PDF
-- Joint return periods (AND, OR, conditional)
-- Iso–return-period contours
-- Kendall risk contours and bootstrap confidence bands
-- Sampling from the Gumbel copula
-- Likelihood evaluation along copula contours
-- Helper utilities for colored plotting and distribution fitting
+- Copula PDF
+- OR iso–return-period contours
+- Joint density along OR contours
+- Helper utilities for distribution fitting
 
 Notation
 --------
@@ -35,31 +32,6 @@ References
 
 import numpy as np
 import scipy as sp
-from scipy.stats import levy_stable, uniform, norm
-
-
-
-# Core Functions
-
-def gumbel_copula(u, v, theta):
-    '''
-    Gumbel copula cumulative distribution function.
-
-    Parameters
-    ----------
-    u, v : array-like
-        Values in [0, 1].
-    theta : float
-        Dependence parameter (theta >= 1).
-
-    Returns
-    -------
-    C : array-like
-        Copula CDF evaluated at (u, v).
-    '''
-    return np.exp(-(((-np.log(u))**theta +
-                      (-np.log(v))**theta)**(1 / theta)))
-
 
 
 
@@ -98,101 +70,6 @@ def gumbel_copula_pdf(u, v, theta):
 
 
 
-def gumbel_copula_cdf(u, v, theta):
-    '''
-    Vectorized Gumbel copula CDF with parameter validation.
-
-    Parameters
-    ----------
-    u, v : array-like
-        Values in [0, 1].
-    theta : float
-        Dependence parameter (theta >= 1).
-
-    Returns
-    -------
-    C : array-like
-        Copula CDF.
-    '''
-    if theta < 1:
-        raise ValueError('theta must be >= 1')
-
-    u = np.asarray(u)
-    v = np.asarray(v)
-
-    term = ((-np.log(u))**theta + (-np.log(v))**theta)**(1 / theta)
-    return np.exp(-term)
-
-
-
-
-# Return Period Functions
-def return_period_AND(u, v, theta):
-    '''
-    Joint return period for the AND case (U > u AND V > v).
-
-    Returns
-    -------
-    T_AND : array-like
-        AND-type return period.
-    '''
-    C = gumbel_copula(u, v, theta)
-    return 1 / (1 - u - v + C)
-
-
-
-
-def return_period_OR(u, v, theta):
-    '''
-    Joint return period for the OR case (U > u OR V > v).
-
-    Returns
-    -------
-    T_OR : array-like
-        OR-type return period.
-    '''
-    C = gumbel_copula(u, v, theta)
-    return 1 / (1 - C)
-
-
-
-
-def return_period_conditional(u, v, theta):
-    '''
-    Conditional return period T(U > u | V > v).
-
-    Returns
-    -------
-    T_cond : array-like
-        Conditional return period.
-    '''
-    C = gumbel_copula(u, v, theta)
-    return (1 - v) / (1 - u - v + C)
-
-
-
-
-# Iso-line Return Period Functions
-def iso_rp_AND(T, theta, u, v, n):
-    '''
-    AND-type iso–return-period contour.
-
-    Returns
-    -------
-    U, V : 2D arrays
-        Meshgrid of copula space.
-    Z : 2D array
-        Zero-contour corresponds to T-year return period.
-    '''
-    U, V = np.meshgrid(u, v)
-    C = gumbel_copula(U, V, theta)
-    Z = 1 - U - V + C
-
-    return U, V, Z - 1 / T
-
-
-
-
 def iso_rp_OR(u, T, theta):
     '''
     OR-type iso–return-period curve v(u).
@@ -220,7 +97,6 @@ def iso_rp_OR(u, T, theta):
 
 
 
-# Density and Marginal Utilities
 def joint_density_OR(u, v, theta, fx, fy):
     '''
     Joint density under OR-conditioning.
@@ -261,84 +137,8 @@ def best_fit_rv(data, dist_names, print_out=False):
             best_aic = aic
             best_dist = dist
             best_params = params
-            
+
         if print_out:
             print(f'Distribution: {best_dist}, AIC: {aic}')
 
     return best_dist, best_params, best_aic
-
-
-
-
-# Kendall Risk Contours and ESS functions
-def kendall_distribution_gumbel(t, theta):
-    '''
-    Kendall distribution K_C(t) for the Gumbel copula
-    '''
-    return t - (t / theta) * np.log(t)
-
-
-
-
-def kendall_level(C_sorted, T):
-    '''
-    Kendall copula level corresponding to return period T.
-    '''
-    q = 1 - 1 / T
-    return np.quantile(C_sorted, q)
-
-
-
-
-
-def gumbel_kendall_isoline(u, c_T, theta):
-    A0 = (-np.log(c_T))**theta
-    B = (-np.log(u))**theta
-
-    v = np.full_like(u, np.nan)
-    valid = B < A0
-    v[valid] = np.exp(-(A0 - B[valid])**(1/theta))
-
-    return v
-
-
-
-
-# Gumbel Contours and Likelihood
-def gumbel_contour(u, c0, theta):
-    '''
-    Compute v(u) for a fixed copula level c0.
-    '''
-    A0 = (-np.log(c0))**theta
-    B = (-np.log(u))**theta
-
-    v = np.full_like(u, np.nan)
-    valid = B < A0
-    v[valid] = np.exp(-(A0 - B[valid])**(1 / theta))
-
-    return v
-
-
-
-
-def likelihood_along_contour(c0, u, theta):
-    '''
-    Evaluate copula density along a Kendall contour.
-
-    Returns
-    -------
-    u, v : array-like
-    c_uv : array-like
-        Copula density values.
-    '''
-    v = gumbel_contour(u, c0, theta)
-    mask = ~np.isnan(v)
-
-    u, v = u[mask], v[mask]
-    copula_density = gumbel_copula_pdf(u, v, theta)
-
-    return u, v, copula_density
-
-
-
-

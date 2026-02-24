@@ -144,27 +144,17 @@ def regional_metrics_from_intervals(
         if overlapping.empty:
             continue
 
-        # clip site intervals to regional window
-        # site_durations = (
-        #     (overlapping.end.clip(upper=t1) -
-        #      overlapping.start.clip(lower=t0))
-        #     .dt.days + 1
-        # )
-
         # ── Duration aggregation ──
         if duration_method == "union":
             duration = (t1 - t0).days + 1
 
         elif duration_method == "mean":
-            # duration = site_durations.mean()
             duration = overlapping['duration'].mean()
 
         elif duration_method == "max":
-            # duration = site_durations.max()
             duration = overlapping['duration'].max()
 
         elif duration_method == "total":
-            # duration = site_durations.sum()
             duration = overlapping['duration'].sum()
 
         # ── Severity aggregation ──
