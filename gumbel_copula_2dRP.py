@@ -727,11 +727,14 @@ def best_fit_rv(data, dist_names, print_out=False):
     -------
     best_dist : scipy.stats distribution class
     best_params : tuple
-    best_aic : float
+    best_aicc : float
+        Corrected AIC (AICc) of the selected distribution.
     '''
     best_aic = np.inf
     best_dist = None
     best_params = None
+
+    n = len(data)
 
     for dist_name in dist_names:
         dist = getattr(sp.stats, dist_name)
@@ -739,14 +742,16 @@ def best_fit_rv(data, dist_names, print_out=False):
         log_likelihood = np.sum(dist.logpdf(data, *params))
         k = len(params)
         aic = 2 * k - 2 * log_likelihood
+        # AICc correction for small samples; reduces to AIC as n → ∞
+        aicc = aic + (2 * k * (k + 1)) / (n - k - 1)
 
-        if aic < best_aic:
-            best_aic = aic
+        if aicc < best_aic:
+            best_aic = aicc
             best_dist = dist
             best_params = params
 
         if print_out:
-            print(f'Distribution: {dist_name}, AIC: {aic:.2f}')
+            print(f'Distribution: {dist_name}, AICc: {aicc:.2f}')
 
     return best_dist, best_params, best_aic
 
