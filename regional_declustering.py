@@ -4,6 +4,102 @@ import numpy as np
 
 
 
+# ── Temporal Clustering ───────────────────────────────────────────────────────
+
+def event_midpoint(start, end):
+    '''
+    Compute the midpoint datetime of an event interval.
+
+    Parameters
+    ----------
+    start, end : datetime-like
+
+    Returns
+    -------
+    midpoint : datetime-like
+    '''
+    return start + (end - start) / 2
+
+
+
+
+def temporal_clustering(events, delta_t):
+    '''
+    Cluster site-level drought events into independent regional events
+    using a fixed reference time for each cluster.
+
+    Events are sorted by their midpoint time. A new cluster starts whenever
+    the current event's midpoint falls more than delta_t after the reference
+    time of the previous cluster.
+
+    Parameters
+    ----------
+    events : pandas.DataFrame
+        Must contain an 'event_time' column (e.g., event midpoint) and be
+        sorted by 'event_time'.
+    delta_t : pandas.Timedelta
+        Maximum separation between events in the same cluster.
+
+    Returns
+    -------
+    clusters : list of pandas.DataFrame
+        One DataFrame per cluster.
+    '''
+    clusters = []
+    current_cluster = [events.iloc[0]]
+    t_ref = events.iloc[0]['event_time']
+
+    for i in range(1, len(events)):
+        t_cur = events.iloc[i]['event_time']
+
+        if (t_cur - t_ref) <= delta_t:
+            current_cluster.append(events.iloc[i])
+        else:
+            clusters.append(pd.DataFrame(current_cluster))
+            current_cluster = [events.iloc[i]]
+            t_ref = t_cur
+
+    clusters.append(pd.DataFrame(current_cluster))
+    return clusters
+
+
+
+
+def aggregate_cluster(cluster, duration_rule='max', severity_rule='max'):
+    '''
+    Aggregate a cluster of site-level drought events into one regional event.
+
+    Parameters
+    ----------
+    cluster : pandas.DataFrame
+        Must contain 'severity' and 'duration' columns.
+    duration_rule : {'max', 'sum', 'mean', 'median'}
+        Aggregation rule for duration.
+    severity_rule : {'max', 'sum', 'mean', 'median'}
+        Aggregation rule for severity.
+
+    Returns
+    -------
+    D : float
+        Aggregated regional duration.
+    S : float
+        Aggregated regional severity.
+    '''
+    rules = {'max', 'sum', 'mean', 'median'}
+
+    if severity_rule not in rules:
+        raise ValueError(f"severity_rule must be one of {rules}")
+    if duration_rule not in rules:
+        raise ValueError(f"duration_rule must be one of {rules}")
+
+    S = getattr(cluster['severity'], severity_rule)()
+    D = getattr(cluster['duration'], duration_rule)()
+
+    return D, S
+
+
+
+
 def regional_concurrence_intervals(
     df,
     frac_thresh=0.2,
