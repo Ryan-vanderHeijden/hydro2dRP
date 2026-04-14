@@ -192,6 +192,153 @@ def regional_concurrence_intervals(
 
 
 
+def regional_concurrence_intervals_spatial(
+    df,
+    adjacency,
+    frac_thresh=0.2,
+    buffer=7,
+    end_gap=7,
+):
+    """
+    Identify spatially coherent regional drought events.
+
+    At each day, finds connected components among active (buffered) sites
+    using the provided adjacency graph. Each component with >= k_min sites
+    is tracked as an independent event. Multiple simultaneous components
+    produce multiple simultaneous events.
+
+    Unlike ``regional_concurrence_intervals``, this function requires that
+    the sites satisfying the threshold form a spatially contiguous patch,
+    preventing fragmented pseudo-regional events driven by teleconnections.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Index: site ID. Columns include 'start', 'end'.
+        (Use ``set_index('site', drop=False)`` so site is both index and column.)
+    adjacency : dict
+        Mapping site_id -> collection of neighboring site_ids for the full
+        site network. The function restricts to sites present in ``df``.
+    frac_thresh : float
+        Fraction of sites in ``df`` required for a component to qualify as
+        a regional event (k_min = ceil(frac_thresh * n_sites)).
+    buffer : int
+        Days of temporal buffer applied symmetrically to each site interval.
+    end_gap : int
+        Consecutive days a component must remain below k_min before its
+        event is terminated.
+
+    Returns
+    -------
+    events : list of (pd.Timestamp, pd.Timestamp)
+        Sorted list of (start, end) regional event intervals.
+    """
+    sites = np.array(sorted(df.index.unique()))
+    n_sites = len(sites)
+    k_min = max(1, int(np.ceil(frac_thresh * n_sites)))
+
+    buffer_td  = pd.Timedelta(days=buffer)
+    end_gap_td = pd.Timedelta(days=end_gap)
+
+    # ── Daily time grid covering all buffered intervals ────────────────────────
+    t_min  = df['start'].min() - buffer_td
+    t_max  = df['end'].max()   + buffer_td
+    days   = pd.date_range(t_min, t_max, freq='D')
+    n_days = len(days)
+
+    # ── Binary indicator matrix (site × day) ──────────────────────────────────
+    site_to_idx = {s: i for i, s in enumerate(sites)}
+
+    X = np.zeros((n_sites, n_days), dtype=bool)
+    for _, row in df.iterrows():
+        i = site_to_idx[row.name]
+        s = max(0,         (row['start'] - buffer_td - t_min).days)
+        e = min(n_days - 1, (row['end']  + buffer_td - t_min).days)
+        if s <= e:
+            X[i, s:e + 1] = True
+
+    # ── Adjacency restricted to this region's sites ────────────────────────────
+    adj = {
+        i: {site_to_idx[nb] for nb in adjacency.get(s, []) if nb in site_to_idx}
+        for s, i in site_to_idx.items()
+    }
+
+    # ── BFS connected components on a set of site indices ─────────────────────
+    def get_components(active_set):
+        visited = set()
+        components = []
+        for s in active_set:
+            if s in visited:
+                continue
+            comp, queue = set(), [s]
+            while queue:
+                node = queue.pop()
+                if node in visited:
+                    continue
+                visited.add(node)
+                comp.add(node)
+                queue.extend((adj.get(node, set()) & active_set) - visited)
+            components.append(comp)
+        return components
+
+    # ── Event tracking ─────────────────────────────────────────────────────────
+    # Each event dict: {'start': Timestamp, 't_below': Timestamp|None, 'sites': set}
+    active_events = []
+    closed_events = []
+
+    for d_idx, day in enumerate(days):
+        active_idx    = set(np.where(X[:, d_idx])[0])
+        large         = [c for c in get_components(active_idx) if len(c) >= k_min]
+        matched_ev_ids = set()
+
+        # Only match against events that existed at the start of this day
+        n_existing = len(active_events)
+
+        for comp in large:
+            best_ev, best_overlap = None, 0
+            for ev_id in range(n_existing):
+                if ev_id in matched_ev_ids:
+                    continue
+                overlap = len(comp & active_events[ev_id]['sites'])
+                if overlap > best_overlap:
+                    best_overlap, best_ev = overlap, ev_id
+
+            if best_ev is not None:
+                # Continue an existing event
+                active_events[best_ev]['sites']   = comp
+                active_events[best_ev]['t_below'] = None
+                matched_ev_ids.add(best_ev)
+            else:
+                # No overlap with any unmatched event — start a new one
+                active_events.append({'start': day, 't_below': None, 'sites': comp})
+                matched_ev_ids.add(len(active_events) - 1)
+
+        # Apply end_gap to events not matched today
+        surviving = []
+        for ev_id, ev in enumerate(active_events):
+            if ev_id in matched_ev_ids:
+                surviving.append(ev)
+                continue
+            if ev['t_below'] is None:
+                ev['t_below'] = day
+                surviving.append(ev)
+            elif day - ev['t_below'] >= end_gap_td:
+                closed_events.append((ev['start'], ev['t_below']))
+            else:
+                surviving.append(ev)
+
+        active_events = surviving
+
+    # Close any events still open at the end of the record
+    for ev in active_events:
+        end_date = ev['t_below'] if ev['t_below'] is not None else days[-1]
+        closed_events.append((ev['start'], end_date))
+
+    return sorted(closed_events)
+
+
+
+
 def regional_metrics_from_intervals(
     df,
     events,
