@@ -440,6 +440,7 @@ def vine_kendall_contour_2d(
     fixed_var,
     fixed_quantiles,
     grid_size=150,
+    axis=None,
     # Legacy MC parameters — accepted but ignored
     n_mc=None,
     band_width=None,
@@ -473,6 +474,12 @@ def vine_kendall_contour_2d(
     fixed_quantiles : array-like
         Quantile values to condition on (e.g., [0.25, 0.50, 0.75, 0.90]).
     grid_size : int     Resolution of the density / CDF grid (default 150).
+                        Ignored when ``axis`` is provided.
+    axis : 1-D array or None
+        Custom grid axis in (0, 1), strictly increasing.  A tail-stretched
+        axis (e.g. ``1 - np.geomspace(0.01, 0.99, n)[::-1]``) improves
+        contour accuracy near the upper tail without increasing n.
+        Defaults to ``np.linspace(1e-3, 1 - 1e-3, grid_size)``.
 
     Returns
     -------
@@ -491,8 +498,17 @@ def vine_kendall_contour_2d(
     free_vars  = [i for i in range(3) if i != fixed_var]
     var_labels = ['u1', 'u2', 'u3']
 
-    axis = np.linspace(1e-3, 1 - 1e-3, grid_size)
-    du   = axis[1] - axis[0]
+    if axis is None:
+        axis = np.linspace(1e-3, 1 - 1e-3, grid_size)
+    else:
+        axis = np.asarray(axis, dtype=float)
+
+    # Midpoint-rule weights for non-uniform axis (reduces to du for uniform)
+    w       = np.empty_like(axis)
+    w[0]    = (axis[1]  - axis[0])  / 2
+    w[-1]   = (axis[-1] - axis[-2]) / 2
+    w[1:-1] = (axis[2:] - axis[:-2]) / 2
+
     # U varies along columns (axis=1), V along rows (axis=0)
     U, V = np.meshgrid(axis, axis)
 
@@ -507,7 +523,8 @@ def vine_kendall_contour_2d(
         density = vc.pdf(vals[0], vals[1], vals[2]).reshape(U.shape)
         density = np.clip(density, 0.0, None)
 
-        total = density.sum() * du * du
+        W     = w[:, None] * w[None, :]   # cell weights, shape (n, n)
+        total = (density * W).sum()
         if total <= 0.0:
             contours.append({
                 'quantile':   float(q),
@@ -520,11 +537,11 @@ def vine_kendall_contour_2d(
             continue
         density = density / total
 
-        # 2-D conditional CDF by cumulative summation
+        # 2-D conditional CDF by cumulative summation with non-uniform weights
         #   cumsum axis=0 integrates over V (rows)
         #   cumsum axis=1 integrates over U (columns)
         # cdf_2d[i,j] = P(free_var_0 ≤ axis[j], free_var_1 ≤ axis[i] | fixed=q)
-        cdf_2d = np.cumsum(np.cumsum(density, axis=0), axis=1) * du * du
+        cdf_2d = np.cumsum(np.cumsum(density * W, axis=0), axis=1)
         cdf_2d = np.clip(cdf_2d / cdf_2d[-1, -1], 0.0, 1.0)
 
         # Kendall distribution: K(t) = mass of density where cdf_2d ≤ t
@@ -533,7 +550,7 @@ def vine_kendall_contour_2d(
         lo, hi   = 0.0, 1.0
         for _ in range(60):
             t_mid = 0.5 * (lo + hi)
-            K_mid = float(density[cdf_2d <= t_mid].sum() * du * du)
+            K_mid = float((density * W)[cdf_2d <= t_mid].sum())
             if K_mid < K_target:
                 lo = t_mid
             else:
@@ -569,7 +586,7 @@ def vine_kendall_contour_2d(
     return contours
 
 
-def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100):
+def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100, axis=None):
     '''
     Evaluate the vine density on a 2D grid with one variable fixed.
 
@@ -581,7 +598,10 @@ def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100):
     vc : VineCopula3D
     fixed_var : int        Index (0, 1, or 2) of the variable to fix.
     fixed_quantile : float Value at which to fix the variable.
-    grid_size : int
+    grid_size : int        Ignored when ``axis`` is provided.
+    axis : 1-D array or None
+        Custom grid axis in (0, 1) — see ``vine_kendall_contour_2d`` for details.
+        Defaults to ``np.linspace(1e-3, 1 - 1e-3, grid_size)``.
 
     Returns
     -------
@@ -592,7 +612,10 @@ def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100):
     free_vars  = [i for i in range(3) if i != fixed_var]
     var_labels = ['u1', 'u2', 'u3']
 
-    axis = np.linspace(1e-3, 1 - 1e-3, grid_size)
+    if axis is None:
+        axis = np.linspace(1e-3, 1 - 1e-3, grid_size)
+    else:
+        axis = np.asarray(axis, dtype=float)
     U, V = np.meshgrid(axis, axis)
 
     vals  = [None, None, None]
@@ -801,6 +824,7 @@ def plot_vine_3d_density_slices(
     fixed_var=2,
     fixed_quantiles=(0.25, 0.50, 0.75, 0.90),
     grid_size=60,
+    axis=None,
     observed=None,
     cmap='YlOrRd',
     figsize=(10, 8),
@@ -818,7 +842,8 @@ def plot_vine_3d_density_slices(
     vc : VineCopula3D
     fixed_var : int        Axis to stack along (0, 1, or 2; default 2 = coverage).
     fixed_quantiles : sequence  Quantile levels for the slices.
-    grid_size : int        Density grid resolution per slice.
+    grid_size : int        Density grid resolution per slice. Ignored when ``axis`` is provided.
+    axis : 1-D array or None   Custom grid axis — see ``vine_density_slice`` for details.
     observed : tuple (u1, u2, u3) or None  Pseudo-obs to scatter in 3-D.
     cmap : str
     figsize : tuple
@@ -845,7 +870,7 @@ def plot_vine_3d_density_slices(
 
     for q in fixed_quantiles:
         U, V, Z, _ = vine_density_slice(vc, fixed_var=fixed_var,
-                                         fixed_quantile=q, grid_size=grid_size)
+                                         fixed_quantile=q, grid_size=grid_size, axis=axis)
         finite = Z[np.isfinite(Z)]
         if len(finite) == 0:
             continue
