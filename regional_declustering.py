@@ -343,28 +343,43 @@ def regional_metrics_from_intervals(
     df,
     events,
     severity_method,
-    duration_method
+    duration_method,
+    spatial_extent_method=None,
 ):
     """
-    Compute regional event severity and duration from site-level intervals.
+    Compute regional event severity, duration, and optionally spatial extent
+    from site-level intervals.
 
     Parameters
     ----------
     df : DataFrame
-        Columns: ['site', 'start', 'end', 'severity']
+        Columns: ['site', 'start', 'end', 'severity'].
+        Must also contain 'duration' when duration_method is 'mean', 'max',
+        or 'total'.
     events : list of (start, end)
-        Regional event intervals
+        Regional event intervals.
     severity_method : {"sum", "mean", "max"}
-        Aggregation of site-level severities
+        Aggregation of site-level severities.
     duration_method : {"union", "mean", "max", "total"}
-        Aggregation of site-level durations
+        Aggregation of site-level durations.
+    spatial_extent_method : {None, "count", "fraction", "max_fraction"}
+        How to quantify spatial extent of each regional event.
+
+        ``None``           — spatial extent is not returned (backward-compatible).
+        ``"count"``        — number of overlapping site-level droughts.
+        ``"fraction"``     — ``count / total sites in df`` (value in [0, 1]).
+        ``"max_fraction"`` — peak fraction of sites active on any single day
+                             during the event, requiring a daily time grid
+                             (costs an extra pass over each event).
 
     Returns
     -------
     durations : ndarray
-        Regional durations
+        Regional durations.
     severities : ndarray
-        Regional severities
+        Regional severities.
+    spatial_extents : ndarray, only when ``spatial_extent_method`` is not None.
+        Spatial extent for each event under the chosen definition.
     """
 
     if severity_method not in {"sum", "mean", "max"}:
@@ -375,8 +390,16 @@ def regional_metrics_from_intervals(
             "duration_method must be 'union', 'mean', 'max', or 'total'"
         )
 
-    durations = []
-    severities = []
+    if spatial_extent_method not in {None, "count", "fraction", "max_fraction"}:
+        raise ValueError(
+            "spatial_extent_method must be None, 'count', 'fraction', or 'max_fraction'"
+        )
+
+    n_sites_total = df['site'].nunique() if spatial_extent_method == "fraction" else None
+
+    durations       = []
+    severities      = []
+    spatial_extents = [] if spatial_extent_method is not None else None
 
     for t0, t1 in events:
 
@@ -412,6 +435,28 @@ def regional_metrics_from_intervals(
 
         durations.append(int(duration))
         severities.append(int(severity))
+
+        # ── Spatial extent ──
+        if spatial_extent_method == "count":
+            spatial_extents.append(len(overlapping))
+
+        elif spatial_extent_method == "fraction":
+            spatial_extents.append(len(overlapping) / n_sites_total)
+
+        elif spatial_extent_method == "max_fraction":
+            # Peak fraction of sites simultaneously active on any day
+            n_sites_total_here = df['site'].nunique()
+            days = pd.date_range(t0, t1, freq='D')
+            peak = 0.0
+            for day in days:
+                n_active = int(((overlapping.start <= day) & (overlapping.end >= day)).sum())
+                frac = n_active / n_sites_total_here
+                if frac > peak:
+                    peak = frac
+            spatial_extents.append(peak)
+
+    if spatial_extent_method is not None:
+        return np.asarray(durations), np.asarray(severities), np.asarray(spatial_extents)
 
     return np.asarray(durations), np.asarray(severities)
 
