@@ -607,6 +607,75 @@ def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100):
 
 # ── 3-D Grid Utilities ─────────────────────────────────────────────────────────
 
+def vine_kendall_grid(vc, T_levels, grid_size=20, n_mc=500_000, random_state=None):
+    '''
+    Compute the vine joint CDF on a 3-D grid and derive Kendall return period
+    levels for isosurface rendering.
+
+    The Kendall return period approach for trivariate copulas:
+
+    1. Estimate C(u1, u2, u3) = P(U1 ≤ u1, U2 ≤ u2, U3 ≤ u3) on a grid via MC.
+    2. Interpolate C at each sample point → empirical Kendall distribution
+       K_n(t) = P(C(S) ≤ t).
+    3. Invert: t*(T) = K_n^{-1}(1 − 1/T)  for each target T.
+    4. The isosurface {(u1, u2, u3): C = t*(T)} is the Kendall T-year surface.
+
+    This is more principled than the AND exceedance approach: the surface is a
+    true level set of the copula CDF, so events "outside" the surface occur
+    less than once every T years in the Kendall sense.
+
+    The grid computation is structurally identical to
+    ``vine_and_return_period_grid`` (same vectorised inner loop), differing
+    only in using ≤ instead of > and returning probabilities in [0, 1].
+
+    Parameters
+    ----------
+    vc : VineCopula3D
+    T_levels : sequence of float   Target Kendall return periods.
+    grid_size : int                Grid points per axis (default 20).
+    n_mc : int                     MC sample count (default 500 000).
+    random_state : int or None
+
+    Returns
+    -------
+    g : 1-D array          Grid axis, shape (grid_size,), in (0.05, 0.95).
+    cdf_grid : 3-D array   Joint CDF values in [0, 1], shape (grid_size,) * 3.
+    t_stars : dict         {T: t_star} — Kendall copula level for each T.
+    '''
+    from scipy.interpolate import RegularGridInterpolator
+
+    s1, s2, s3 = vc.simulate(n_mc, random_state=random_state)
+    g = np.linspace(0.05, 0.95, grid_size)
+    cdf_grid = np.empty((grid_size,) * 3)
+
+    for i, q1 in enumerate(g):
+        m1    = s1 <= q1
+        sub2  = s2[m1]
+        sub3  = s3[m1]
+        for j, q2 in enumerate(g):
+            m2      = sub2 <= q2
+            sub3_j  = sub3[m2]
+            counts  = (sub3_j[:, np.newaxis] <= g[np.newaxis, :]).sum(axis=0)
+            cdf_grid[i, j, :] = counts / n_mc
+
+    # Interpolate CDF at sample points to get the empirical Kendall distribution.
+    # Clip samples to grid domain before interpolation.
+    interp = RegularGridInterpolator(
+        (g, g, g), cdf_grid,
+        method='linear', bounds_error=False, fill_value=None,
+    )
+    pts          = np.clip(np.column_stack([s1, s2, s3]), g[0], g[-1])
+    c_at_samples = np.clip(interp(pts), 0.0, 1.0)
+
+    # Kendall level for each T: the (1 - 1/T) quantile of copula values at samples
+    t_stars = {
+        float(T): float(np.quantile(c_at_samples, 1.0 - 1.0 / T))
+        for T in T_levels
+    }
+
+    return g, cdf_grid, t_stars
+
+
 def vine_and_return_period_grid(vc, grid_size=20, n_mc=500_000, random_state=None):
     '''
     Estimate T_AND on a regular 3-D grid via Monte Carlo.
@@ -647,6 +716,66 @@ def vine_and_return_period_grid(vc, grid_size=20, n_mc=500_000, random_state=Non
             T_and[i, j, :] = np.where(p > 0, 1.0 / p, np.inf)
 
     return g, T_and
+
+
+def vine_kendall_return_periods(vc, u1_obs, u2_obs, u3_obs, g, cdf_grid,
+                                n_mc=500_000, random_state=None):
+    '''
+    Assign a Kendall return period to each observed event using a precomputed
+    joint CDF grid.
+
+    Steps
+    -----
+    1. Interpolate ``cdf_grid`` at each observed point → copula CDF values c_obs.
+    2. Draw ``n_mc`` samples from the vine, interpolate cdf_grid at those samples
+       → empirical Kendall distribution K_n.
+    3. T_kendall = 1 / (1 − K_n(c_obs)).
+
+    Using fresh MC for K_n decouples its resolution from the (potentially small)
+    n_mc used when the grid was computed.
+
+    Parameters
+    ----------
+    vc : VineCopula3D
+    u1_obs, u2_obs, u3_obs : array_like   Observed points in copula space,
+                                           in the original variable order.
+    g : 1-D array                          Grid axis from vine_kendall_grid.
+    cdf_grid : 3-D array                   Joint CDF grid from vine_kendall_grid.
+    n_mc : int                             MC samples for K_n estimation (default 500 000).
+    random_state : int or None
+
+    Returns
+    -------
+    T_kendall : 1-D array   Kendall return period (years) for each observed event.
+    c_obs     : 1-D array   Copula CDF value at each observed event.
+    '''
+    from scipy.interpolate import RegularGridInterpolator
+
+    u1_obs = np.asarray(u1_obs, dtype=float)
+    u2_obs = np.asarray(u2_obs, dtype=float)
+    u3_obs = np.asarray(u3_obs, dtype=float)
+
+    interp = RegularGridInterpolator(
+        (g, g, g), cdf_grid,
+        method='linear', bounds_error=False, fill_value=None,
+    )
+
+    # Empirical Kendall distribution from fresh MC
+    s1, s2, s3 = vc.simulate(n_mc, random_state=random_state)
+    pts_mc  = np.clip(np.column_stack([s1, s2, s3]), g[0], g[-1])
+    c_mc    = np.sort(np.clip(interp(pts_mc), 0.0, 1.0))
+
+    # CDF values at observed points
+    pts_obs = np.clip(np.column_stack([u1_obs, u2_obs, u3_obs]), g[0], g[-1])
+    c_obs   = np.clip(interp(pts_obs), 0.0, 1.0)
+
+    # K_n(c_obs): fraction of MC samples with copula value ≤ c_obs
+    K_n = np.searchsorted(c_mc, c_obs, side='right') / n_mc
+    # Guard against K_n = 1 (which gives T = inf)
+    K_n = np.minimum(K_n, 1.0 - 1.0 / n_mc)
+    T_kendall = 1.0 / (1.0 - K_n)
+
+    return T_kendall, c_obs
 
 
 # ── 3-D Visualisation ──────────────────────────────────────────────────────────
@@ -723,26 +852,42 @@ def plot_vine_3d_density_slices(
 
 def plot_vine_3d_isosurface(
     g,
-    T_and_grid,
+    value_grid,
     T_levels=(10, 50, 100),
+    t_stars=None,
     observed=None,
     figsize=(10, 8),
     ax=None,
 ):
     '''
-    3-D AND return period isosurfaces via the Marching Cubes algorithm.
+    3-D return period isosurfaces via the Marching Cubes algorithm.
 
     Requires ``scikit-image`` (``pip install scikit-image``).
 
-    Isosurfaces are plotted in log₁₀(T) space so that spacing between
-    nested shells is perceptually uniform.  The innermost shell (lowest T)
-    is the most opaque; outermost (highest T) the most transparent.
+    Supports two modes selected by whether ``t_stars`` is supplied:
+
+    **AND mode** (``t_stars=None``, default)
+        ``value_grid`` is the raw T_AND array from
+        ``vine_and_return_period_grid``.  Plotted in log₁₀(T) space for
+        perceptually uniform shell spacing.
+
+    **Kendall mode** (``t_stars`` provided)
+        ``value_grid`` is the joint CDF array from ``vine_kendall_grid``.
+        ``t_stars`` is the ``{T: t_star}`` dict returned by that function.
+        Isosurfaces are level sets of the copula CDF — each shell encloses
+        exactly the fraction (1 − 1/T) of events in the Kendall sense.
+
+    The outermost shell (lowest T, rarest interior) is added first and is
+    the most transparent; the innermost shell is the most opaque.
 
     Parameters
     ----------
-    g : 1-D array        Grid axis from ``vine_and_return_period_grid``.
-    T_and_grid : 3-D array  T_AND values, shape ``(len(g),) * 3``.
-    T_levels : sequence  Return periods to render as nested isosurfaces.
+    g : 1-D array          Grid axis, shared for all three dimensions.
+    value_grid : 3-D array T_AND values (AND mode) or CDF values (Kendall mode).
+    T_levels : sequence    Return periods to render — used in AND mode and as
+                           dict keys in Kendall mode.
+    t_stars : dict or None {T: copula_level} from ``vine_kendall_grid``.
+                           If provided, selects Kendall mode.
     observed : tuple (u1, u2, u3) or None  Pseudo-obs scatter overlay.
     figsize : tuple
     ax : Axes3D or None
@@ -754,9 +899,7 @@ def plot_vine_3d_isosurface(
     try:
         from skimage.measure import marching_cubes
     except ImportError:
-        raise ImportError(
-            'scikit-image is required: pip install scikit-image'
-        )
+        raise ImportError('scikit-image is required: pip install scikit-image')
     from mpl_toolkits.mplot3d import Axes3D           # noqa: F401
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -766,26 +909,41 @@ def plot_vine_3d_isosurface(
     else:
         fig = ax.get_figure()
 
-    dg    = float(g[1] - g[0])
-    log_T = np.log10(np.clip(T_and_grid, 1.0, 1e9))
-    log_T = np.where(np.isfinite(log_T), log_T, np.nanmax(log_T[np.isfinite(log_T)]))
-    lo, hi = float(log_T.min()), float(log_T.max())
+    dg = float(g[1] - g[0])
 
-    # Sort descending so the outermost (lowest-T) shell is added first
-    colors   = plt.cm.plasma_r(np.linspace(0.15, 0.85, len(T_levels)))
-    alphas   = np.linspace(0.20, 0.45, len(T_levels))   # innermost most opaque
+    # ── Prepare the scalar field and iso-levels ────────────────────────────────
+    if t_stars is not None:
+        # Kendall mode: CDF grid in [0, 1]; levels are copula values
+        plot_grid    = np.asarray(value_grid, dtype=float)
+        T_items      = sorted(t_stars.items(), key=lambda x: x[1], reverse=False)
+        level_pairs  = [(T, float(t)) for T, t in T_items]   # (T, iso_level)
+    else:
+        # AND mode: T_AND grid; work in log10 for uniform shell spacing
+        raw = np.log10(np.clip(value_grid, 1.0, 1e9))
+        fin = raw[np.isfinite(raw)]
+        plot_grid   = np.where(np.isfinite(raw), raw, fin.max())
+        level_pairs = sorted(
+            [(T, np.log10(float(T))) for T in T_levels],
+            key=lambda x: x[1], reverse=False,
+        )
 
-    for T_target, col, alpha in zip(
-        sorted(T_levels, reverse=True), colors, alphas
-    ):
-        level = np.log10(float(T_target))
-        if not (lo < level < hi):
+    lo  = float(plot_grid.min())
+    hi  = float(plot_grid.max())
+
+    # Sort so outermost (rarest, highest T) shell is added first → drawn behind
+    level_pairs_desc = sorted(level_pairs, key=lambda x: x[1], reverse=True)
+    n_levels = len(level_pairs_desc)
+    colors   = plt.cm.plasma_r(np.linspace(0.15, 0.85, n_levels))
+    alphas   = np.linspace(0.20, 0.45, n_levels)
+
+    for (T_target, iso_level), col, alpha in zip(level_pairs_desc, colors, alphas):
+        if not (lo < iso_level < hi):
             continue
         try:
             verts, faces, _, _ = marching_cubes(
-                log_T, level=level, spacing=(dg, dg, dg)
+                plot_grid, level=iso_level, spacing=(dg, dg, dg)
             )
-            verts += g[0]   # shift from [0, …] to [g[0], …]
+            verts += g[0]
             mesh = Poly3DCollection(
                 verts[faces], alpha=alpha, facecolor=col,
                 edgecolor='none', label=f'T = {T_target:g} yr',
