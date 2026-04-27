@@ -52,6 +52,7 @@ References
 '''
 
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.stats import kendalltau
 
 from archimedean_copulas import (
@@ -438,98 +439,131 @@ def vine_kendall_contour_2d(
     T,
     fixed_var,
     fixed_quantiles,
-    grid_size=200,
-    n_mc=200_000,
-    band_width=0.04,
+    grid_size=150,
+    # Legacy MC parameters — accepted but ignored
+    n_mc=None,
+    band_width=None,
     random_state=None,
 ):
     '''
-    Compute 2D Kendall return period contours from the vine by conditioning
-    one variable at fixed quantile levels.
+    Compute 2D Kendall return period contours from the exact vine conditional
+    density (no Monte Carlo, no banding, no parametric family assumption).
 
-    Strategy
-    --------
     For each quantile q of the fixed variable:
-    1. Draw n_mc samples from the vine.
-    2. Retain samples where the fixed variable falls in [q-band, q+band].
-    3. Fit the best bivariate copula to the two free variables among
-       the retained samples (re-selecting family by AICc).
-    4. Compute and return the Kendall T-year contour for that conditional
-       bivariate copula.
 
-    This gives an approximate conditional contour; accuracy improves with
-    larger n_mc and smaller band_width (subject to the sample-size trade-off).
+    1. Evaluate the vine's conditional density
+       f(u_a, u_b | fixed_var = q) = vine.pdf(...)
+       on a ``grid_size × grid_size`` grid (fast — no simulation required).
+    2. Normalise and compute the 2-D conditional CDF by cumulative summation.
+    3. Estimate the Kendall level t* via binary search on
+       K(t) = ∫∫_{F(u,v)≤t} f(u,v|q) du dv  such that  K(t*) = 1 − 1/T.
+    4. Extract the 1-D contour v(u) by linear interpolation along each
+       column of the CDF grid.
+
+    This replaces the previous MC + hard-band + copula-refit approach.
+    Results are deterministic, noise-free, and exact up to grid resolution.
+    The legacy ``n_mc``, ``band_width``, and ``random_state`` parameters are
+    accepted for backward compatibility but have no effect.
 
     Parameters
     ----------
     vc : VineCopula3D
-    T : float              Target Kendall return period.
-    fixed_var : int        Index (0, 1, or 2) of the variable to fix.
+    T : float           Target Kendall return period (years).
+    fixed_var : int     Index (0, 1, or 2) of the variable to condition on.
     fixed_quantiles : array-like
-        Quantile values to condition on (e.g., [0.25, 0.50, 0.75]).
-    grid_size : int        Resolution of the returned contour grids.
-    n_mc : int
-    band_width : float     Half-width of the conditioning band (default 0.04).
-    random_state : int or None
+        Quantile values to condition on (e.g., [0.25, 0.50, 0.75, 0.90]).
+    grid_size : int     Resolution of the density / CDF grid (default 150).
 
     Returns
     -------
     contours : list of dict
         One entry per quantile level.  Keys:
-        - ``'quantile'``    : the fixed quantile.
-        - ``'u'``           : u-grid for the free variable on the x-axis.
-        - ``'v'``           : v-values on the Kendall contour (NaN where
-                              outside valid range).
-        - ``'var_labels'``  : (x-label, y-label) for the two free variables.
-        - ``'family'``      : selected bivariate copula family.
-        - ``'theta'``       : fitted parameter.
-        - ``'n_cond'``      : number of conditioning samples used.
-        Returns ``'u': None, 'v': None`` if too few samples fall in the band.
+        ``'quantile'``   — the fixed quantile.
+        ``'u'``          — 1-D array of free-var-0 values on the contour.
+        ``'v'``          — 1-D array of free-var-1 values on the contour.
+        ``'U'``, ``'V'`` — 2-D meshgrid arrays (for ``ax.contour``).
+        ``'cdf_2d'``     — conditional copula CDF on the grid.
+        ``'t_star'``     — Kendall level used for the contour.
+        ``'var_labels'`` — (x-label, y-label) for the two free axes.
+        ``'method'``     — ``'exact'``.
+        Returns ``'u': None, 'v': None`` if the density grid is degenerate.
     '''
-    s1, s2, s3  = vc.simulate(n_mc, random_state=random_state)
-    samples     = np.column_stack([s1, s2, s3])
+    free_vars  = [i for i in range(3) if i != fixed_var]
+    var_labels = ['u1', 'u2', 'u3']
 
-    free_vars   = [i for i in range(3) if i != fixed_var]
-    var_labels  = ['u1', 'u2', 'u3']
-    u_grid      = np.linspace(1e-3, 1 - 1e-3, grid_size)
+    axis = np.linspace(1e-3, 1 - 1e-3, grid_size)
+    du   = axis[1] - axis[0]
+    # U varies along columns (axis=1), V along rows (axis=0)
+    U, V = np.meshgrid(axis, axis)
 
     contours = []
-    for q in np.asarray(fixed_quantiles):
-        mask  = (samples[:, fixed_var] >= q - band_width) & \
-                (samples[:, fixed_var] <= q + band_width)
-        cond  = samples[mask]
+    for q in np.asarray(fixed_quantiles, dtype=float):
+        vals               = [None, None, None]
+        vals[fixed_var]    = np.full(U.shape, q)
+        vals[free_vars[0]] = U
+        vals[free_vars[1]] = V
 
-        if len(cond) < 30:
+        # Conditional density: vine pdf with fixed_var pinned at q
+        density = vc.pdf(vals[0], vals[1], vals[2]).reshape(U.shape)
+        density = np.clip(density, 0.0, None)
+
+        total = density.sum() * du * du
+        if total <= 0.0:
             contours.append({
                 'quantile':   float(q),
-                'u':          None,
-                'v':          None,
+                'u': None, 'v': None,
+                'U': U, 'V': V, 'cdf_2d': None, 't_star': None,
                 'var_labels': (var_labels[free_vars[0]],
                                var_labels[free_vars[1]]),
-                'family':     None,
-                'theta':      None,
-                'n_cond':     len(cond),
+                'method': 'exact',
             })
             continue
+        density = density / total
 
-        x = cond[:, free_vars[0]]
-        y = cond[:, free_vars[1]]
+        # 2-D conditional CDF by cumulative summation
+        #   cumsum axis=0 integrates over V (rows)
+        #   cumsum axis=1 integrates over U (columns)
+        # cdf_2d[i,j] = P(free_var_0 ≤ axis[j], free_var_1 ≤ axis[i] | fixed=q)
+        cdf_2d = np.cumsum(np.cumsum(density, axis=0), axis=1) * du * du
+        cdf_2d = np.clip(cdf_2d / cdf_2d[-1, -1], 0.0, 1.0)
 
-        _, best = select_copula(x, y)
-        fam     = best['family']
-        theta   = best['theta']
-        t_level = invert_kendall_level(1.0 - 1.0 / T, theta, fam)
-        v_line  = copula_contour(u_grid, t_level, theta, fam)
+        # Kendall distribution: K(t) = mass of density where cdf_2d ≤ t
+        # Binary search for t* such that K(t*) = 1 − 1/T
+        K_target = 1.0 - 1.0 / T
+        lo, hi   = 0.0, 1.0
+        for _ in range(60):
+            t_mid = 0.5 * (lo + hi)
+            K_mid = float(density[cdf_2d <= t_mid].sum() * du * du)
+            if K_mid < K_target:
+                lo = t_mid
+            else:
+                hi = t_mid
+        t_star = 0.5 * (lo + hi)
+
+        # Extract 1-D contour v(u) by column-wise linear interpolation
+        u_line, v_line = [], []
+        for j, uj in enumerate(axis):
+            col = cdf_2d[:, j]   # CDF along V-axis at fixed U = uj
+            if col.min() < t_star < col.max():
+                idx = int(np.searchsorted(col, t_star))
+                idx = np.clip(idx, 1, len(col) - 1)
+                t0, t1 = col[idx - 1], col[idx]
+                v0, v1 = axis[idx - 1], axis[idx]
+                span = t1 - t0
+                vj   = v0 + (t_star - t0) * (v1 - v0) / span if span > 0 else v0
+                u_line.append(uj)
+                v_line.append(vj)
 
         contours.append({
             'quantile':   float(q),
-            'u':          u_grid,
-            'v':          v_line,
-            'var_labels': (var_labels[free_vars[0]],
-                           var_labels[free_vars[1]]),
-            'family':     fam,
-            'theta':      theta,
-            'n_cond':     len(cond),
+            'u':          np.array(u_line) if u_line else None,
+            'v':          np.array(v_line) if v_line else None,
+            'U':          U,
+            'V':          V,
+            'cdf_2d':     cdf_2d,
+            't_star':     t_star,
+            'var_labels': (var_labels[free_vars[0]], var_labels[free_vars[1]]),
+            'method':     'exact',
         })
 
     return contours
@@ -569,3 +603,208 @@ def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100):
     Z = vc.pdf(vals[0], vals[1], vals[2]).reshape(U.shape)
 
     return U, V, Z, (var_labels[free_vars[0]], var_labels[free_vars[1]])
+
+
+# ── 3-D Grid Utilities ─────────────────────────────────────────────────────────
+
+def vine_and_return_period_grid(vc, grid_size=20, n_mc=500_000, random_state=None):
+    '''
+    Estimate T_AND on a regular 3-D grid via Monte Carlo.
+
+    T_AND[i,j,k] = 1 / P(U1 > g[i], U2 > g[j], U3 > g[k])
+    estimated from ``n_mc`` samples drawn once and reused for all grid points.
+
+    The vectorised inner loop collapses the k-axis into a single NumPy
+    operation, avoiding a triple nested loop while keeping memory manageable
+    (peak: n_active_samples × grid_size booleans per outer iteration).
+
+    Parameters
+    ----------
+    vc : VineCopula3D
+    grid_size : int        Number of grid points per axis (default 20).
+    n_mc : int             MC sample count (default 500 000).
+    random_state : int or None
+
+    Returns
+    -------
+    g : 1-D array          Grid axis, shape (grid_size,), in (0.05, 0.95).
+    T_and : 3-D array      Return periods, shape (grid_size, grid_size, grid_size).
+    '''
+    s1, s2, s3 = vc.simulate(n_mc, random_state=random_state)
+    g = np.linspace(0.05, 0.95, grid_size)
+    T_and = np.empty((grid_size, grid_size, grid_size))
+
+    for i, q1 in enumerate(g):
+        m1     = s1 > q1
+        sub2   = s2[m1]
+        sub3   = s3[m1]
+        for j, q2 in enumerate(g):
+            m2      = sub2 > q2
+            sub3_j  = sub3[m2]
+            # Vectorise over k: count exceedances above every g threshold at once
+            counts  = (sub3_j[:, np.newaxis] > g[np.newaxis, :]).sum(axis=0)
+            p       = counts / n_mc
+            T_and[i, j, :] = np.where(p > 0, 1.0 / p, np.inf)
+
+    return g, T_and
+
+
+# ── 3-D Visualisation ──────────────────────────────────────────────────────────
+
+def plot_vine_3d_density_slices(
+    vc,
+    fixed_var=2,
+    fixed_quantiles=(0.25, 0.50, 0.75, 0.90),
+    grid_size=60,
+    observed=None,
+    cmap='YlOrRd',
+    figsize=(10, 8),
+    ax=None,
+):
+    '''
+    3-D matplotlib figure: vine density contours stacked at fixed quantile levels.
+
+    Each panel is a ``contourf`` slice offset at its quantile level along the
+    fixed-variable axis, giving a tomographic view of the joint density.
+    Observed pseudo-observations are overlaid as a scatter if supplied.
+
+    Parameters
+    ----------
+    vc : VineCopula3D
+    fixed_var : int        Axis to stack along (0, 1, or 2; default 2 = coverage).
+    fixed_quantiles : sequence  Quantile levels for the slices.
+    grid_size : int        Density grid resolution per slice.
+    observed : tuple (u1, u2, u3) or None  Pseudo-obs to scatter in 3-D.
+    cmap : str
+    figsize : tuple
+    ax : Axes3D or None    If None, a new figure is created.
+
+    Returns
+    -------
+    fig, ax
+    '''
+    from mpl_toolkits.mplot3d import Axes3D   # noqa: F401
+
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax  = fig.add_subplot(111, projection='3d')
+    else:
+        fig = ax.get_figure()
+
+    var_labels = ['U_duration', 'U_severity', 'U_coverage']
+    free_vars  = [i for i in range(3) if i != fixed_var]
+
+    # zdir mapping: which 3-D axis the slice is offset along
+    zdir_map = {0: 'x', 1: 'y', 2: 'z'}
+    zdir     = zdir_map[fixed_var]
+
+    for q in fixed_quantiles:
+        U, V, Z, _ = vine_density_slice(vc, fixed_var=fixed_var,
+                                         fixed_quantile=q, grid_size=grid_size)
+        finite = Z[np.isfinite(Z)]
+        if len(finite) == 0:
+            continue
+        Z_plot = np.clip(Z, 0, np.percentile(finite, 98))
+        ax.contourf(U, V, Z_plot, zdir=zdir, offset=q,
+                    levels=12, cmap=cmap, alpha=0.65)
+
+    if observed is not None:
+        u1, u2, u3 = observed
+        ax.scatter(u1, u2, u3, s=12, c='steelblue', alpha=0.5,
+                   edgecolors='none', zorder=5)
+
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_zlim(0, 1)
+    ax.set_xlabel(var_labels[free_vars[0]])
+    ax.set_ylabel(var_labels[free_vars[1]])
+    ax.set_zlabel(var_labels[fixed_var])
+
+    return fig, ax
+
+
+def plot_vine_3d_isosurface(
+    g,
+    T_and_grid,
+    T_levels=(10, 50, 100),
+    observed=None,
+    figsize=(10, 8),
+    ax=None,
+):
+    '''
+    3-D AND return period isosurfaces via the Marching Cubes algorithm.
+
+    Requires ``scikit-image`` (``pip install scikit-image``).
+
+    Isosurfaces are plotted in log₁₀(T) space so that spacing between
+    nested shells is perceptually uniform.  The innermost shell (lowest T)
+    is the most opaque; outermost (highest T) the most transparent.
+
+    Parameters
+    ----------
+    g : 1-D array        Grid axis from ``vine_and_return_period_grid``.
+    T_and_grid : 3-D array  T_AND values, shape ``(len(g),) * 3``.
+    T_levels : sequence  Return periods to render as nested isosurfaces.
+    observed : tuple (u1, u2, u3) or None  Pseudo-obs scatter overlay.
+    figsize : tuple
+    ax : Axes3D or None
+
+    Returns
+    -------
+    fig, ax
+    '''
+    try:
+        from skimage.measure import marching_cubes
+    except ImportError:
+        raise ImportError(
+            'scikit-image is required: pip install scikit-image'
+        )
+    from mpl_toolkits.mplot3d import Axes3D           # noqa: F401
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax  = fig.add_subplot(111, projection='3d')
+    else:
+        fig = ax.get_figure()
+
+    dg    = float(g[1] - g[0])
+    log_T = np.log10(np.clip(T_and_grid, 1.0, 1e9))
+    log_T = np.where(np.isfinite(log_T), log_T, np.nanmax(log_T[np.isfinite(log_T)]))
+    lo, hi = float(log_T.min()), float(log_T.max())
+
+    # Sort descending so the outermost (lowest-T) shell is added first
+    colors   = plt.cm.plasma_r(np.linspace(0.15, 0.85, len(T_levels)))
+    alphas   = np.linspace(0.20, 0.45, len(T_levels))   # innermost most opaque
+
+    for T_target, col, alpha in zip(
+        sorted(T_levels, reverse=True), colors, alphas
+    ):
+        level = np.log10(float(T_target))
+        if not (lo < level < hi):
+            continue
+        try:
+            verts, faces, _, _ = marching_cubes(
+                log_T, level=level, spacing=(dg, dg, dg)
+            )
+            verts += g[0]   # shift from [0, …] to [g[0], …]
+            mesh = Poly3DCollection(
+                verts[faces], alpha=alpha, facecolor=col,
+                edgecolor='none', label=f'T = {T_target:g} yr',
+            )
+            ax.add_collection3d(mesh)
+        except Exception:
+            pass
+
+    if observed is not None:
+        u1, u2, u3 = observed
+        ax.scatter(u1, u2, u3, s=12, c='k', alpha=0.45,
+                   edgecolors='none', zorder=5, label='Observed')
+
+    ax.set_xlim(g[0], g[-1])
+    ax.set_ylim(g[0], g[-1])
+    ax.set_zlim(g[0], g[-1])
+    ax.set_xlabel('U_duration')
+    ax.set_ylabel('U_severity')
+    ax.set_zlabel('U_coverage')
+    ax.legend(loc='upper left', fontsize=9)
+
+    return fig, ax
