@@ -607,7 +607,7 @@ def vine_density_slice(vc, fixed_var, fixed_quantile, grid_size=100):
 
 # ── 3-D Grid Utilities ─────────────────────────────────────────────────────────
 
-def vine_kendall_grid(vc, T_levels, grid_size=20, n_mc=500_000, random_state=None):
+def vine_kendall_grid(vc, T_levels, grid_size=20, g=None, n_mc=500_000, random_state=None):
     '''
     Compute the vine joint CDF on a 3-D grid and derive Kendall return period
     levels for isosurface rendering.
@@ -633,20 +633,30 @@ def vine_kendall_grid(vc, T_levels, grid_size=20, n_mc=500_000, random_state=Non
     vc : VineCopula3D
     T_levels : sequence of float   Target Kendall return periods.
     grid_size : int                Grid points per axis (default 20).
+                                   Ignored when ``g`` is provided.
+    g : 1-D array or None          Custom grid axis in (0, 1), strictly
+                                   increasing.  Use a tail-stretched axis
+                                   (e.g. ``1 - np.geomspace(0.05, 0.95, n)[::-1]``)
+                                   for better isosurface resolution near (1,1,1)
+                                   without increasing the total cell count.
+                                   Defaults to ``np.linspace(0.05, 0.95, grid_size)``.
     n_mc : int                     MC sample count (default 500 000).
     random_state : int or None
 
     Returns
     -------
-    g : 1-D array          Grid axis, shape (grid_size,), in (0.05, 0.95).
-    cdf_grid : 3-D array   Joint CDF values in [0, 1], shape (grid_size,) * 3.
+    g : 1-D array          Grid axis (as provided or constructed), shape (n,).
+    cdf_grid : 3-D array   Joint CDF values in [0, 1], shape (n, n, n).
     t_stars : dict         {T: t_star} — Kendall copula level for each T.
     '''
     from scipy.interpolate import RegularGridInterpolator
 
     s1, s2, s3 = vc.simulate(n_mc, random_state=random_state)
-    g = np.linspace(0.05, 0.95, grid_size)
-    cdf_grid = np.empty((grid_size,) * 3)
+    if g is None:
+        g = np.linspace(0.05, 0.95, grid_size)
+    else:
+        g = np.asarray(g, dtype=float)
+    cdf_grid = np.empty((len(g),) * 3)
 
     for i, q1 in enumerate(g):
         m1    = s1 <= q1
@@ -676,9 +686,9 @@ def vine_kendall_grid(vc, T_levels, grid_size=20, n_mc=500_000, random_state=Non
     return g, cdf_grid, t_stars
 
 
-def vine_and_return_period_grid(vc, grid_size=20, n_mc=500_000, random_state=None):
+def vine_and_return_period_grid(vc, grid_size=20, g=None, n_mc=500_000, random_state=None):
     '''
-    Estimate T_AND on a regular 3-D grid via Monte Carlo.
+    Estimate T_AND on a 3-D grid via Monte Carlo.
 
     T_AND[i,j,k] = 1 / P(U1 > g[i], U2 > g[j], U3 > g[k])
     estimated from ``n_mc`` samples drawn once and reused for all grid points.
@@ -691,17 +701,23 @@ def vine_and_return_period_grid(vc, grid_size=20, n_mc=500_000, random_state=Non
     ----------
     vc : VineCopula3D
     grid_size : int        Number of grid points per axis (default 20).
+                           Ignored when ``g`` is provided.
+    g : 1-D array or None  Custom grid axis — see ``vine_kendall_grid`` for details.
+                           Defaults to ``np.linspace(0.05, 0.95, grid_size)``.
     n_mc : int             MC sample count (default 500 000).
     random_state : int or None
 
     Returns
     -------
-    g : 1-D array          Grid axis, shape (grid_size,), in (0.05, 0.95).
-    T_and : 3-D array      Return periods, shape (grid_size, grid_size, grid_size).
+    g : 1-D array          Grid axis (as provided or constructed).
+    T_and : 3-D array      Return periods, shape (n, n, n).
     '''
     s1, s2, s3 = vc.simulate(n_mc, random_state=random_state)
-    g = np.linspace(0.05, 0.95, grid_size)
-    T_and = np.empty((grid_size, grid_size, grid_size))
+    if g is None:
+        g = np.linspace(0.05, 0.95, grid_size)
+    else:
+        g = np.asarray(g, dtype=float)
+    T_and = np.empty((len(g),) * 3)
 
     for i, q1 in enumerate(g):
         m1     = s1 > q1
@@ -909,7 +925,8 @@ def plot_vine_3d_isosurface(
     else:
         fig = ax.get_figure()
 
-    dg = float(g[1] - g[0])
+    # Index-to-physical mapping for non-uniform grids
+    g_idx = np.arange(len(g), dtype=float)
 
     # ── Prepare the scalar field and iso-levels ────────────────────────────────
     if t_stars is not None:
@@ -940,10 +957,10 @@ def plot_vine_3d_isosurface(
         if not (lo < iso_level < hi):
             continue
         try:
-            verts, faces, _, _ = marching_cubes(
-                plot_grid, level=iso_level, spacing=(dg, dg, dg)
-            )
-            verts += g[0]
+            verts, faces, _, _ = marching_cubes(plot_grid, level=iso_level)
+            # Map from index space [0, n-1] to physical g (handles non-uniform axes)
+            for dim in range(3):
+                verts[:, dim] = np.interp(verts[:, dim], g_idx, g)
             mesh = Poly3DCollection(
                 verts[faces], alpha=alpha, facecolor=col,
                 edgecolor='none', label=f'T = {T_target:g} yr',
